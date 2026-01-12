@@ -2,3 +2,5 @@ test.ipynb
 .vscode/
 data/
 dataset.ipynb
+Logs/
+.venv/

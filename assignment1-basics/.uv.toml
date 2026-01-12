@@ -1,0 +1,3 @@
+[tool.uv]
+venv = "/root/autodl-tmp/package"
+cache-dir = "/root/autodl-tmp/package/.cache"
