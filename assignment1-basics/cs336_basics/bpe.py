@@ -11,7 +11,8 @@ from collections import Counter,defaultdict
 import time
 import pprint
 
-logger.add('/root/autodl-tmp/Stanford_CS336/Logs/Assignment1.log')
+# logger.add('/root/autodl-tmp/Stanford_CS336/Logs/Assignment1.log')
+logger.add('./../Logs/Assignment1.log')
 
 def load_and_chunk_file(
     input_path: str,
@@ -20,7 +21,7 @@ def load_and_chunk_file(
     Debug=False): # Load the file given by "input_path" and divide it into chunks
 
     with open(input_path,"rb") as f:
-        num_processes = 4
+        num_processes = 16
 
         split_token_bytes = split_special_token[0].encode("utf-8")
         boundaries = find_chunk_boundaries(file=f,desired_num_chunks=desired_num_chunks,split_special_token=split_token_bytes)
