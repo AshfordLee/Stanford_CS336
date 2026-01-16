@@ -85,20 +85,6 @@ class tokenizer():
                 if token_id is not None:
                     result.append(token_id)
 
-        # result = []
-        
-        # # 第一个for循环：直接遍历正则匹配，不收集到列表
-        # for match in re.finditer(self.PAT,text):
-        #     pre_token = match.group()
-        #     pre_token_bytes = pre_token.encode("utf-8")
-            
-        #     # 直接传入bytes，让apply_bpe_merges处理
-        #     merged_parts = self.apply_bpe_merges(pre_token_bytes)
-            
-        #     for part in merged_parts:
-        #         token_id = self.vocab_reverse.get(part,None)
-        #         if token_id is not None:
-        #             result.append(token_id)
 
 
         return result
@@ -122,24 +108,6 @@ class tokenizer():
 
         return current_parts
 
-        # 在这里创建token列表（这是必须的，因为BPE需要token序列）
-        # current_parts = [bytes([b]) for b in token_bytes]
-        
-        # # 第二个for循环：遍历所有merges进行合并
-        # for merge_pair in self.merges:
-        #     byte1, byte2 = merge_pair
-            
-        #     i = 0
-        #     while i < len(current_parts) - 1:
-        #         if current_parts[i] == byte1 and current_parts[i+1] == byte2:
-        #             merged = byte1 + byte2
-        #             current_parts[i] = merged
-        #             del current_parts[i+1]
-        #             # 合并后不前进，因为可能有连续合并
-        #         else:
-        #             i += 1
-
-        # return current_parts
 
 
         
