@@ -4,6 +4,8 @@ from typing import IO, Any, BinaryIO
 from tests import test_tokenizer
 import random
 import numpy as np
+import multiprocessing as mp
+from functools import partial
 
 TinyStories_Vocab_Path = './../TinyStories_Result/vocab.json'
 TinyStories_Merges_Path = './../TinyStories_Result/merges.txt'
@@ -72,6 +74,38 @@ def encode_entire_file(filepath,tokenizer):
     # 一次性编码整个文件内容
     tokens = tokenizer.encode(content)
     return tokens
+
+def encode_documents_batch(docs_batch,tokenizer):
+    tokens = []
+    for doc in docs_batch:
+        doc_tokens = tokenizer.encode(doc)
+        tokens.extend(doc_tokens)
+    return tokens
+
+def encode_documents_parallel(documents, tokenizer, num_processes=None):
+
+    if num_processes is None:
+        num_processes = min(mp.cpu_count(), 96)  # 使用最多32个进程
+    
+    # 将文档分成批次
+    batch_size = max(1, len(documents) // num_processes)
+    doc_batches = [documents[i:i + batch_size] for i in range(0, len(documents), batch_size)]
+    
+    # 创建编码函数（固定tokenizer参数）
+    encode_func = partial(encode_documents_batch, tokenizer=tokenizer)
+    
+    print(f"Using {len(doc_batches)} processes to encode {len(documents)} documents...")
+    
+    # 使用进程池并行处理
+    with mp.Pool(processes=len(doc_batches)) as pool:
+        results = pool.map(encode_func, doc_batches)
+    
+    # 合并所有批次的结果
+    all_tokens = []
+    for batch_tokens in results:
+        all_tokens.extend(batch_tokens)
+    
+    return all_tokens
 
 if __name__ == "__main__":
     
@@ -164,23 +198,28 @@ if __name__ == "__main__":
 
     print("\nEncoding all TinyStories Dataset")
     
-    # 编码TinyStories训练数据集
-    print("Encoding TinyStories train dataset...")
-    TinyStories_Train_Encode = encode_entire_file(TinyStories_Datapath, tinystories_tokenizer)
-    
-    # 编码TinyStories验证数据集
     print("Encoding TinyStories valid dataset...")
-    TinyStories_Valid_Encode = encode_entire_file(TinyStories_Valid_Datapath, tinystories_tokenizer)
+    TinyStories_Valid_docs = all_documents_from_file(TinyStories_Valid_Datapath)
+    TinyStories_Valid_Encode = encode_documents_parallel(TinyStories_Valid_docs, tinystories_tokenizer)
+
+
+    print("Encoding TinyStories train dataset...")
+    TinyStories_Train_docs = all_documents_from_file(TinyStories_Datapath)
+    TinyStories_Train_Encode = encode_documents_parallel(TinyStories_Train_docs, tinystories_tokenizer)
+    
 
     print("\nEncoding all OpenWebText Dataset")
     
-    # 编码OpenWebText训练数据集
-    print("Encoding OpenWebText train dataset...")
-    OpenWebText_Train_Encode = encode_entire_file(OpenWebText_Datapath, openwebtext_tokenizer)
-    
-    # 编码OpenWebText验证数据集
+
     print("Encoding OpenWebText valid dataset...")
-    OpenWebText_Valid_Encode = encode_entire_file(OpenWebText_Valid_Datapath, openwebtext_tokenizer)
+    OpenWebText_Valid_docs = all_documents_from_file(OpenWebText_Valid_Datapath)
+    OpenWebText_Valid_Encode = encode_documents_parallel(OpenWebText_Valid_docs, openwebtext_tokenizer)
+
+    
+    print("Encoding OpenWebText train dataset...")
+    OpenWebText_Train_docs = all_documents_from_file(OpenWebText_Datapath)
+    OpenWebText_Train_Encode = encode_documents_parallel(OpenWebText_Train_docs, openwebtext_tokenizer)
+    
 
 
     print("\nSaving encoded datasets as uint16 NumPy arrays...")
