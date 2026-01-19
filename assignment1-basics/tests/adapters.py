@@ -204,7 +204,7 @@ def run_multihead_self_attention_with_rope(
         implementation with the given QKV projection weights and input features.
     """
     # raise NotImplementedError
-    multihead = transformer.multihead_self_attention(d_model=d_model, num_heads=num_heads, use_rope=True)
+    multihead = transformer.multihead_self_attention(d_model=d_model, num_heads=num_heads, use_rope=True, max_seq_len=max_seq_len, theta=theta, token_positions=token_positions)
     multihead.q_proj.weight.data = q_proj_weight
     multihead.k_proj.weight.data = k_proj_weight
     multihead.v_proj.weight.data = v_proj_weight
@@ -307,7 +307,22 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    transformer_block = transformer.transformer_block(d_model=d_model, num_heads=num_heads, d_ff=d_ff, max_seq_len=max_seq_len, theta=theta)
+    transformer_block.norm1.weights.data = weights['ln1.weight']
+    transformer_block.norm2.weights.data = weights['ln2.weight']
+
+    transformer_block.attn.q_proj.weight.data = weights['attn.q_proj.weight']
+    transformer_block.attn.k_proj.weight.data = weights['attn.k_proj.weight']
+    transformer_block.attn.v_proj.weight.data = weights['attn.v_proj.weight']
+    transformer_block.attn.output_proj.weight.data = weights['attn.output_proj.weight']
+    transformer_block.ffn.w1_weight.data = weights['ffn.w1.weight']
+    transformer_block.ffn.w2_weight.data = weights['ffn.w2.weight']
+    transformer_block.ffn.w3_weight.data = weights['ffn.w3.weight']
+
+    return transformer_block(in_features)
+
+
 
 
 def run_transformer_lm(
@@ -389,7 +404,33 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    transformerlm = transformer.transformer_lm(d_model=d_model,num_heads=num_heads,d_ff=d_ff,vocab_size=vocab_size,
+    context_length=context_length,num_layers=num_layers,use_rope=True,theta=rope_theta)
+
+    transformerlm.Token_Embedding.weight.data = weights['token_embeddings.weight']
+    for layer_idx in range(num_layers):
+        block = transformerlm.layers[layer_idx]
+
+        # Attention weights
+        block.attn.q_proj.weight.data = weights[f'layers.{layer_idx}.attn.q_proj.weight']
+        block.attn.k_proj.weight.data = weights[f'layers.{layer_idx}.attn.k_proj.weight']
+        block.attn.v_proj.weight.data = weights[f'layers.{layer_idx}.attn.v_proj.weight']
+        block.attn.output_proj.weight.data = weights[f'layers.{layer_idx}.attn.output_proj.weight']
+        
+        # RMSNorm weights
+        block.norm1.weights.data = weights[f'layers.{layer_idx}.ln1.weight']
+        block.norm2.weights.data = weights[f'layers.{layer_idx}.ln2.weight']
+        
+        # FFN weights
+        block.ffn.w1_weight.data = weights[f'layers.{layer_idx}.ffn.w1.weight']
+        block.ffn.w2_weight.data = weights[f'layers.{layer_idx}.ffn.w2.weight']
+        block.ffn.w3_weight.data = weights[f'layers.{layer_idx}.ffn.w3.weight']
+
+    transformerlm.norm.weights.data = weights['ln_final.weight']
+    transformerlm.linear.weight.data = weights['lm_head.weight']
+
+    return transformerlm(in_indices)
+    # raise NotImplementedError
 
 
 def run_rmsnorm(
@@ -488,7 +529,9 @@ def run_cross_entropy(
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    return transformer.cross_entropy(inputs,targets)
+
 
 
 def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
@@ -507,7 +550,8 @@ def get_adamw_cls() -> Any:
     """
     Returns a torch.optim.Optimizer that implements AdamW.
     """
-    raise NotImplementedError
+    # raise NotImplementedError
+    return transformer.AdamW
 
 
 def run_get_lr_cosine_schedule(

@@ -184,12 +184,13 @@ class scaled_dot_product_attention(nn.Module):
 
 class multihead_self_attention(nn.Module):
 
-    def __init__(self, d_model, num_heads, use_rope=True):
+    def __init__(self, d_model, num_heads, use_rope=True,max_seq_len=1024, theta=10000,token_positions=None):
         super().__init__()
 
         self.d_model = d_model
         self.num_heads = num_heads
         self.use_rope = use_rope
+        self.token_positions = token_positions
 
         self.d_k = d_model // num_heads
         self.d_v = self.d_k
@@ -200,7 +201,7 @@ class multihead_self_attention(nn.Module):
         self.output_proj = Linear(num_heads * self.d_v, d_model)
 
         if self.use_rope:
-            self.rope = RoPE(theta=10000, d_k=self.d_k, max_seq_len=1024)
+            self.rope = RoPE(theta=theta, d_k=self.d_k, max_seq_len=max_seq_len)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch_size, seq_len, d_model = x.shape
@@ -217,6 +218,7 @@ class multihead_self_attention(nn.Module):
         if self.use_rope:
             # 创建 token_positions [seq_len]
             token_positions = torch.arange(seq_len, device=x.device)
+            # token_positions = self.token_positions
 
             # 为每个头应用 RoPE，形状 [batch, num_heads, seq, d_k]
             for head in range(self.num_heads):
@@ -241,3 +243,134 @@ class multihead_self_attention(nn.Module):
         output = self.output_proj(attended_values)  # [batch, seq, d_model]
 
         return output
+
+
+class transformer_block(nn.Module):
+
+    def __init__(self,d_model,num_heads,d_ff,use_rope=True,max_seq_len=1024,theta=10000):
+        super().__init__()
+
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+
+        self.norm1 = rmsnorm(d_model = self.d_model)
+        self.norm2 = rmsnorm(d_model = self.d_model)
+        self.attn = multihead_self_attention(d_model = self.d_model, num_heads = self.num_heads, max_seq_len=max_seq_len, theta=theta,use_rope=use_rope)
+        self.ffn = positionwise_feedforward(d_model = self.d_model, d_ff = self.d_ff)
+
+
+    def forward(self,x):
+
+        block1_output = x + self.attn(self.norm1(x))
+        block2_output = block1_output + self.ffn(self.norm2(block1_output))
+
+        return block2_output
+
+
+class transformer_lm(nn.Module):
+
+    def __init__(self,d_model,num_heads,d_ff,vocab_size,context_length,num_layers,use_rope,max_seq_len=1024,theta=10000):
+        super().__init__()
+
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+        self.num_layers = num_layers
+        self.max_seq_len = max_seq_len
+        self.theta = theta
+
+        self.Token_Embedding = Embedding(num_embeddings=self.vocab_size, embedding_dim = self.d_model)
+        self.layers = nn.ModuleList([transformer_block(d_model=self.d_model, num_heads=self.num_heads, d_ff=self.d_ff, use_rope=use_rope,max_seq_len=self.max_seq_len, theta=self.theta) for _ in range(self.num_layers)])
+        self.norm = rmsnorm(d_model = self.d_model)
+        self.linear = Linear(in_features=self.d_model, out_features=self.vocab_size)
+
+
+    def forward(self,x):
+
+        x = self.Token_Embedding(x)
+
+        for layer in self.layers:
+            x = layer(x)
+
+        x = self.norm(x)
+
+        x = self.linear(x)
+
+        # softmax_layer = Softmax(x, dimension=-1)
+        # return softmax_layer.forward()
+
+        return x
+
+
+def cross_entropy(inputs,targets):
+    
+    vocab_size = inputs.shape[-1]
+    max_logits = torch.max(inputs,dim=-1,keepdim=True)[0]
+
+    inputs_shifted = inputs - max_logits
+
+    log_sum_exp = torch.log(torch.sum(torch.exp(inputs_shifted),dim=-1))
+    correct_logits = torch.gather(inputs_shifted, -1, targets.unsqueeze(-1)).squeeze(-1) 
+
+    losses = -correct_logits + log_sum_exp
+
+    return torch.mean(losses)
+
+
+class AdamW(torch.optim.Optimizer):
+
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0):
+        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
+        super().__init__(params, defaults)
+
+        for group in self.param_groups:
+            for p in group['params']:
+                state = self.state[p]
+                state.setdefault('t', 0)
+                state.setdefault('m_t', torch.zeros_like(p.data))
+                state.setdefault('v_t', torch.zeros_like(p.data))
+
+    def step(self, closure=None):
+        loss = None if closure is None else closure()
+        for group in self.param_groups:
+            lr = group['lr']
+            beta_1, beta_2 = group['betas']
+            epsilon = group['eps']
+            lambda_ = group['weight_decay']
+
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+
+                state = self.state[p]
+
+                t = state.get("t", 0) + 1
+
+                m_t = state.get("m_t", torch.zeros_like(p.data))
+                v_t = state.get("v_t", torch.zeros_like(p.data))
+
+                grad = p.grad.data
+
+                m_t = beta_1 * m_t + (1 - beta_1) * grad
+                v_t = beta_2 * v_t + (1 - beta_2) * (grad * grad)
+
+                state["t"] = t
+                state["m_t"] = m_t
+                state["v_t"] = v_t
+
+                bias_correction1 = 1 - (beta_1 ** t)
+                bias_correction2 = 1 - (beta_2 ** t)
+
+                alpha_t = lr * (math.sqrt(bias_correction2) / bias_correction1)
+
+                denom = v_t.sqrt().add(epsilon)
+                update = m_t / denom
+                p.data = p.data - alpha_t * update
+
+                if lambda_ != 0:
+                    p.data = p.data - lr * lambda_ * p.data
+
+        return loss
