@@ -1,7 +1,13 @@
+import typing
 import torch
 import torch.nn as nn
 import math
 from einops import rearrange
+from collections.abc import Iterable
+import numpy as np
+import os
+import typing
+
 
 class Linear(nn.Module):
 
@@ -16,11 +22,8 @@ class Linear(nn.Module):
 
         std = 2/(self.in_features+self.out_features)
 
-        self.weight = nn.init.trunc_normal_(tensor=torch.empty(self.out_features,self.in_features),
-        mean=0,
-        std=std,
-        a=-3*std,
-        b=3*std)
+        self.weight = nn.Parameter(torch.empty(self.out_features, self.in_features))
+        nn.init.trunc_normal_(self.weight, mean=0, std=std, a=-3*std, b=3*std)
 
     def forward(self,x:torch.Tensor) -> torch.Tensor:
         
@@ -38,11 +41,8 @@ class Embedding(nn.Module):
         self.device = device
         self.dtype = dtype
 
-        self.weight = nn.init.trunc_normal_(tensor=torch.empty(self.num_embeddings,self.embedding_dim),
-        mean=0,
-        std=1,
-        a=-3,
-        b=3)
+        self.weight = nn.Parameter(torch.empty(self.num_embeddings, self.embedding_dim))
+        nn.init.trunc_normal_(self.weight, mean=0, std=1, a=-3, b=3)
 
 
     def forward(self,token_ids:torch.Tensor) -> torch.Tensor:
@@ -56,11 +56,12 @@ class rmsnorm(nn.Module):
         super().__init__()
 
         self.d_model = d_model
-        self.eps = eps 
+        self.eps = eps
         self.device = device
         self.dtype = dtype
 
-        self.weights = nn.init.trunc_normal_(tensor=torch.ones(self.d_model))
+        self.weights = nn.Parameter(torch.ones(self.d_model))
+        nn.init.trunc_normal_(self.weights, mean=0, std=1, a=-3, b=3)
 
     def forward(self,x:torch.Tensor) -> torch.Tensor:
 
@@ -80,9 +81,13 @@ class positionwise_feedforward(nn.Module):
         self.d_model = d_model
         self.d_ff = d_ff
 
-        self.w1_weight = nn.init.trunc_normal_(tensor=torch.empty(self.d_ff,self.d_model))
-        self.w2_weight = nn.init.trunc_normal_(tensor=torch.empty(self.d_model,self.d_ff))
-        self.w3_weight = nn.init.trunc_normal_(tensor=torch.empty(self.d_ff,self.d_model))
+        self.w1_weight = nn.Parameter(torch.empty(self.d_ff, self.d_model))
+        self.w2_weight = nn.Parameter(torch.empty(self.d_model, self.d_ff))
+        self.w3_weight = nn.Parameter(torch.empty(self.d_ff, self.d_model))
+
+        nn.init.trunc_normal_(self.w1_weight, mean=0, std=1, a=-3, b=3)
+        nn.init.trunc_normal_(self.w2_weight, mean=0, std=1, a=-3, b=3)
+        nn.init.trunc_normal_(self.w3_weight, mean=0, std=1, a=-3, b=3)
 
     def silu(self,x):
         return torch.sigmoid(x) * x
@@ -374,3 +379,149 @@ class AdamW(torch.optim.Optimizer):
                     p.data = p.data - lr * lambda_ * p.data
 
         return loss
+
+def silu(x):
+    return torch.sigmoid(x) * x
+
+def learning_rate_schedule(t, alpha_max, alpha_min, T_w, T_c):
+
+    if t < T_w:
+        alpha_t = (t / T_w) * alpha_max
+
+    elif T_w <= t <= T_c:
+        cos_num = ((t - T_w)/(T_c - T_w)) * torch.pi
+        alpha_t = alpha_min + 1/2 * (1 + math.cos(cos_num)) * (alpha_max - alpha_min)
+
+    else:
+        alpha_t = alpha_min
+
+    return alpha_t
+
+def gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float,eps = 1e-6):
+    grads = []
+
+    for param in parameters:
+        if param.grad is not None:
+            grads.append(param.grad.data.view(-1))
+
+    if not grads:
+        return torch.tensor(0.0)
+
+    all_grads = torch.cat(grads)
+    l2_norm = torch.norm(all_grads,p=2)
+
+
+    if l2_norm > max_l2_norm:
+        clip_coef = max_l2_norm / (l2_norm + eps)
+
+        for param in parameters:
+            if param.grad is not None:
+                param.grad.data.mul_(clip_coef)
+
+def data_loading(x:np.array,batch_size,context_length,device='cpu'):
+    max_start_idx = len(x) - context_length
+
+    start_indices = np.random.randint(0,max_start_idx,size=batch_size)
+
+    inputs = np.zeros((batch_size,context_length),dtype=np.int64)
+    targets = np.zeros((batch_size,context_length),dtype=np.int64)
+
+    for i, start_idx in enumerate(start_indices):
+        inputs[i] = x[start_idx:start_idx + context_length]
+        targets[i] = x[start_idx + 1:start_idx + context_length + 1]
+
+    inputs_tensor = torch.from_numpy(inputs).to(device)
+    targets_tensor = torch.from_numpy(targets).to(device)
+
+    return inputs_tensor,targets_tensor
+
+
+def save_checkpoint(model:torch.nn.Module,optimizer:torch.optim.Optimizer,iteration:int,out:str | os.PathLike | typing.BinaryIO | typing.IO[bytes]):
+
+    model_state = model.state_dict()
+    optimizer_state = optimizer.state_dict()
+
+    checkpoint = {
+        'model_state_dict': model_state,
+        'optimizer_state_dict': optimizer_state,
+        'iteration': iteration
+    }
+
+    torch.save(checkpoint,out)
+
+
+def load_checkpoint(src:str | os.PathLike | typing.BinaryIO | typing.IO[bytes], model:torch.nn.Module, optimizer:torch.optim.Optimizer):
+
+    checkpoint = torch.load(src)
+
+    model.load_state_dict(checkpoint['model_state_dict'])
+    
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+    return checkpoint['iteration']
+
+
+def decoding(model: torch.nn.Module,
+            prompt_tokens:list[int],
+            max_tokens:int,
+            temperature:float,
+            top_p:float,
+            end_token_id:int):
+
+    model.eval()
+    device = next(model.parameters()).device
+
+    generated = prompt_tokens.copy()
+
+    with torch.no_grad():
+        for _ in range(max_tokens):
+
+            input_tensor = torch.tensor([generated],dtype=torch.long).to(device)
+
+            logits = model(input_tensor)
+
+            next_token_logits = logits[:,-1,:]
+
+            next_token_logits = next_token_logits / temperature
+
+            probs = torch.softmax(next_token_logits, dim=-1)
+
+            if top_p < 1.0:
+                probs = apply_top_p_sampling(probs, top_p)
+
+            next_token = torch.multinomial(probs, num_samples=1)
+            next_token_id = next_token.item()
+
+            generated.append(next_token_id)
+
+
+            if next_token_id == end_token_id:
+                break
+
+    return generated
+
+def apply_top_p_sampling(probs: torch.Tensor, top_p: float) -> torch.Tensor:
+
+    batch_size, vocab_size = probs.shape
+    
+    for i in range(batch_size):
+        # 对第i个batch的概率排序
+        sorted_probs, sorted_indices = torch.sort(probs[i], descending=True)
+        
+        # 计算累积概率
+        cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+        
+        # 找到需要保留的token数量 (至少保留1个)
+        cutoff_mask = cumulative_probs <= top_p
+        cutoff_mask[0] = True  # 确保至少保留概率最高的token
+        
+        # 截断概率并重新归一化
+        top_p_probs = sorted_probs * cutoff_mask
+        top_p_probs = top_p_probs / top_p_probs.sum()
+        
+        # 将截断后的概率放回原位置
+        truncated_probs = torch.zeros_like(probs[i])
+        truncated_probs[sorted_indices] = top_p_probs
+        probs[i] = truncated_probs
+    
+    return probs

@@ -8,3 +8,4 @@ data_loader.py
 .pytest_cache/
 OpenWebText_Result/
 TinyStories_Result/
+*.pt
