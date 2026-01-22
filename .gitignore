@@ -9,3 +9,4 @@ data_loader.py
 OpenWebText_Result/
 TinyStories_Result/
 *.pt
+HyperParameter_Result/

@@ -150,8 +150,8 @@ def train():
     logger.info(f"训练配置: max_steps={args.max_steps}, batch_size={args.batch_size}, device={args.device}")
 
     while step < args.max_steps:
-        logger.info(f"=== 开始第 {step} 步训练 ===")
-        logger.info(f"正在生成批次数据... (步数: {step})")
+        # logger.info(f"=== 开始第 {step} 步训练 ===")
+        # logger.info(f"正在生成批次数据... (步数: {step})")
 
         batch_start_time = torch.cuda.Event(enable_timing=True) if args.device == 'cuda' else None
         if batch_start_time:
@@ -159,23 +159,23 @@ def train():
 
         # 获取批次数据
         x, y = transformer.data_loading(train_data, args.batch_size, args.context_length, args.device)
-        logger.info(f"批次数据生成完成，数据形状: x={x.shape}, y={y.shape}")
+        # logger.info(f"批次数据生成完成，数据形状: x={x.shape}, y={y.shape}")
 
         # 计算当前学习率
-        logger.info(f"正在计算学习率... (步数: {step})")
+        # logger.info(f"正在计算学习率... (步数: {step})")
         current_lr = transformer.learning_rate_schedule(
             step, alpha_max, alpha_min, T_w, T_c
         )
-        logger.info(f"学习率计算完成: {current_lr:.6f}")
+        # logger.info(f"学习率计算完成: {current_lr:.6f}")
 
         # 更新优化器学习率
-        logger.info("正在更新优化器学习率...")
+        # logger.info("正在更新优化器学习率...")
         for param_group in optimizer.param_groups:
             param_group['lr'] = current_lr
-        logger.info("优化器学习率更新完成")
+        # logger.info("优化器学习率更新完成")
 
         # 前向传播
-        logger.info("正在进行前向传播...")
+        # logger.info("正在进行前向传播...")
         forward_start = torch.cuda.Event(enable_timing=True) if args.device == 'cuda' else None
         if forward_start:
             forward_start.record()
@@ -187,15 +187,15 @@ def train():
             forward_end.record()
             torch.cuda.synchronize()
             forward_time = forward_start.elapsed_time(forward_end)
-            logger.info(f"前向传播完成，耗时: {forward_time:.2f}ms，输出形状: {logits.shape}")
+            # logger.info(f"前向传播完成，耗时: {forward_time:.2f}ms，输出形状: {logits.shape}")
 
         # 损失计算
-        logger.info("正在计算损失...")
+        # logger.info("正在计算损失...")
         loss = compute_loss(logits, y)
-        logger.info(f"损失计算完成: {loss.item():.4f}")
+        # logger.info(f"损失计算完成: {loss.item():.4f}")
 
         # 反向传播
-        logger.info("正在进行反向传播...")
+        # logger.info("正在进行反向传播...")
         optimizer.zero_grad()
         backward_start = torch.cuda.Event(enable_timing=True) if args.device == 'cuda' else None
         if backward_start:
@@ -208,17 +208,17 @@ def train():
             backward_end.record()
             torch.cuda.synchronize()
             backward_time = backward_start.elapsed_time(backward_end)
-            logger.info(f"反向传播完成，耗时: {backward_time:.2f}ms")
+            # logger.info(f"反向传播完成，耗时: {backward_time:.2f}ms")
 
         # 使用你自己的梯度裁剪
-        logger.info("正在进行梯度裁剪...")
+        # logger.info("正在进行梯度裁剪...")
         transformer.gradient_clipping(model.parameters(), args.gradient_clip)
-        logger.info("梯度裁剪完成")
+        # logger.info("梯度裁剪完成")
 
         # 优化器步骤
-        logger.info("正在执行优化器步骤...")
+        # logger.info("正在执行优化器步骤...")
         optimizer.step()
-        logger.info("优化器步骤完成")
+        # logger.info("优化器步骤完成")
 
         step += 1
 
