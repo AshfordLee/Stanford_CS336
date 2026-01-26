@@ -107,6 +107,32 @@ class positionwise_feedforward(nn.Module):
 
         return output
 
+class positionwise_feedforward_silu(nn.Module):
+
+    def __init__(self, d_model):
+        super().__init__()
+        
+        self.d_model = d_model
+        self.d_ff = 4 * d_model  # 4 × dmodel
+        
+        self.w1_weight = nn.Parameter(torch.empty(self.d_ff, self.d_model))
+        self.w2_weight = nn.Parameter(torch.empty(self.d_model, self.d_ff))
+        
+        nn.init.trunc_normal_(self.w1_weight, mean=0, std=1, a=-3, b=3)
+        nn.init.trunc_normal_(self.w2_weight, mean=0, std=1, a=-3, b=3)
+
+    def forward(self, x):
+        # W1x
+        w1x = torch.einsum("...d,fd->...f", x, self.w1_weight)
+        
+        # SiLU(W1x)
+        silu_w1x = torch.sigmoid(w1x) * w1x
+        
+        # W2(SiLU(W1x))
+        output = torch.einsum("...f,df->...d", silu_w1x, self.w2_weight)
+        
+        return output
+
 
 class RoPE(nn.Module):
 
@@ -273,6 +299,83 @@ class transformer_block(nn.Module):
         return block2_output
 
 
+class transformer_block_no_norm(nn.Module):
+
+    def __init__(self,d_model,num_heads,d_ff,use_rope=True,max_seq_len=1024,theta=10000):
+        super().__init__()
+
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+
+        self.norm1 = rmsnorm(d_model = self.d_model)
+        self.norm2 = rmsnorm(d_model = self.d_model)
+        self.attn = multihead_self_attention(d_model = self.d_model, num_heads = self.num_heads, max_seq_len=max_seq_len, theta=theta,use_rope=use_rope)
+        self.ffn = positionwise_feedforward(d_model = self.d_model, d_ff = self.d_ff)
+
+
+    def forward(self,x):
+
+        # block1_output = x + self.attn(self.norm1(x))
+        # block2_output = block1_output + self.ffn(self.norm2(block1_output))
+
+        block1_output = x + self.attn(x)
+        block2_output = block1_output + self.ffn(block1_output)
+
+        return block2_output
+
+
+class transformer_block_pre_norm(nn.Module):
+
+
+    def __init__(self,d_model,num_heads,d_ff,use_rope=True,max_seq_len=1024,theta=10000):
+        super().__init__()
+
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+
+        self.norm1 = rmsnorm(d_model = self.d_model)
+        self.norm2 = rmsnorm(d_model = self.d_model)
+        self.attn = multihead_self_attention(d_model = self.d_model, num_heads = self.num_heads, max_seq_len=max_seq_len, theta=theta,use_rope=use_rope)
+        self.ffn = positionwise_feedforward(d_model = self.d_model, d_ff = self.d_ff)
+
+
+    def forward(self,x):
+
+        # block1_output = x + self.attn(self.norm1(x))
+        # block2_output = block1_output + self.ffn(self.norm2(block1_output))
+
+        block1_output = self.norm1(x + self.attn(x))
+        block2_output = self.norm2(block1_output + self.ffn(block1_output))
+
+        return block2_output
+
+    
+
+
+class transformer_block_silu(nn.Module):
+
+    def __init__(self,d_model,num_heads,d_ff,use_rope=True,max_seq_len=1024,theta=10000):
+        super().__init__()
+
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+
+        self.norm1 = rmsnorm(d_model = self.d_model)
+        self.norm2 = rmsnorm(d_model = self.d_model)
+        self.attn = multihead_self_attention(d_model = self.d_model, num_heads = self.num_heads, max_seq_len=max_seq_len, theta=theta,use_rope=use_rope)
+        self.ffn = positionwise_feedforward_silu(d_model = self.d_model)
+
+
+    def forward(self,x):
+
+        block1_output = x + self.attn(self.norm1(x))
+        block2_output = block1_output + self.ffn(self.norm2(block1_output))
+
+        return block2_output
+
 class transformer_lm(nn.Module):
 
     def __init__(self,d_model,num_heads,d_ff,vocab_size,context_length,num_layers,use_rope,max_seq_len=1024,theta=10000):
@@ -309,7 +412,149 @@ class transformer_lm(nn.Module):
 
         return x
 
+class transformer_lm_no_norm(nn.Module):
 
+    def __init__(self,d_model,num_heads,d_ff,vocab_size,context_length,num_layers,use_rope,max_seq_len=1024,theta=10000):
+        super().__init__()
+
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+        self.num_layers = num_layers
+        self.max_seq_len = max_seq_len
+        self.theta = theta
+
+        self.Token_Embedding = Embedding(num_embeddings=self.vocab_size, embedding_dim = self.d_model)
+        self.layers = nn.ModuleList([transformer_block_no_norm(d_model=self.d_model, num_heads=self.num_heads, d_ff=self.d_ff, use_rope=use_rope,max_seq_len=self.max_seq_len, theta=self.theta) for _ in range(self.num_layers)])
+        self.linear = Linear(in_features=self.d_model, out_features=self.vocab_size)
+
+
+    def forward(self,x):
+
+        x = self.Token_Embedding(x)
+
+        for layer in self.layers:
+            x = layer(x)
+
+        x = self.linear(x)
+
+        # softmax_layer = Softmax(x, dimension=-1)
+        # return softmax_layer.forward()
+
+        return x
+
+class transformer_lm_pre_norm(nn.Module):
+
+    def __init__(self,d_model,num_heads,d_ff,vocab_size,context_length,num_layers,use_rope,max_seq_len=1024,theta=10000):
+        super().__init__()
+
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+        self.num_layers = num_layers
+        self.max_seq_len = max_seq_len
+        self.theta = theta
+
+        self.Token_Embedding = Embedding(num_embeddings=self.vocab_size, embedding_dim = self.d_model)
+        self.layers = nn.ModuleList([transformer_block_pre_norm(d_model=self.d_model, num_heads=self.num_heads, d_ff=self.d_ff, use_rope=use_rope,max_seq_len=self.max_seq_len, theta=self.theta) for _ in range(self.num_layers)])
+        self.norm = rmsnorm(d_model = self.d_model)
+        self.linear = Linear(in_features=self.d_model, out_features=self.vocab_size)
+
+
+    def forward(self,x):
+
+        x = self.Token_Embedding(x)
+
+        for layer in self.layers:
+            x = layer(x)
+
+        x = self.norm(x)
+
+        x = self.linear(x)
+
+        # softmax_layer = Softmax(x, dimension=-1)
+        # return softmax_layer.forward()
+
+        return x
+
+
+class transformer_lm(nn.Module):
+
+    def __init__(self,d_model,num_heads,d_ff,vocab_size,context_length,num_layers,use_rope,max_seq_len=1024,theta=10000):
+        super().__init__()
+
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+        self.num_layers = num_layers
+        self.max_seq_len = max_seq_len
+        self.theta = theta
+
+        self.Token_Embedding = Embedding(num_embeddings=self.vocab_size, embedding_dim = self.d_model)
+        self.layers = nn.ModuleList([transformer_block(d_model=self.d_model, num_heads=self.num_heads, d_ff=self.d_ff, use_rope=use_rope,max_seq_len=self.max_seq_len, theta=self.theta) for _ in range(self.num_layers)])
+        self.norm = rmsnorm(d_model = self.d_model)
+        self.linear = Linear(in_features=self.d_model, out_features=self.vocab_size)
+
+
+    def forward(self,x):
+
+        x = self.Token_Embedding(x)
+
+        for layer in self.layers:
+            x = layer(x)
+
+        x = self.norm(x)
+
+        x = self.linear(x)
+
+        # softmax_layer = Softmax(x, dimension=-1)
+        # return softmax_layer.forward()
+
+        return x
+
+class transformer_lm_silu(nn.Module):
+
+    def __init__(self,d_model,num_heads,d_ff,vocab_size,context_length,num_layers,use_rope,max_seq_len=1024,theta=10000):
+        super().__init__()
+
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+        self.num_layers = num_layers
+        self.max_seq_len = max_seq_len
+        self.theta = theta
+
+        self.Token_Embedding = Embedding(num_embeddings=self.vocab_size, embedding_dim = self.d_model)
+        self.layers = nn.ModuleList([transformer_block_silu(d_model=self.d_model, num_heads=self.num_heads, d_ff=self.d_ff, use_rope=use_rope,max_seq_len=self.max_seq_len, theta=self.theta) for _ in range(self.num_layers)])
+        self.norm = rmsnorm(d_model = self.d_model)
+        self.linear = Linear(in_features=self.d_model, out_features=self.vocab_size)
+
+
+    def forward(self,x):
+
+        x = self.Token_Embedding(x)
+
+        for layer in self.layers:
+            x = layer(x)
+
+        x = self.norm(x)
+
+        x = self.linear(x)
+
+        # softmax_layer = Softmax(x, dimension=-1)
+        # return softmax_layer.forward()
+
+        return x
+
+        
 def cross_entropy(inputs,targets):
     
     vocab_size = inputs.shape[-1]
