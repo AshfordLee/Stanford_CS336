@@ -27,7 +27,8 @@ class Linear(nn.Module):
 
     def forward(self,x:torch.Tensor) -> torch.Tensor:
         
-        return torch.einsum("...i,ji->...j",x,self.weight)
+        # return torch.einsum("...i,ji->...j",x,self.weight)
+        return torch.einsum("ji,...i->...j",self.weight,x)
 
 
 class Embedding(nn.Module):

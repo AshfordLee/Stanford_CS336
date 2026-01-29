@@ -1,4 +1,5 @@
-from cs336_basics import transformer,tokenizer
+from cs336_basics import transformer
+from cs336_basics.tokenizer import tokenizer
 import torch
 
 def generate_text_demo():
