@@ -196,7 +196,7 @@ class scaled_dot_product_attention(nn.Module):
 
     def __init__(self,K,Q,V,mask):
         super().__init__()
-        self.Q = Q # [batch,...seq_q,d_k]
+        self.Q = Q # [batch,...seq_q,d_q]
         self.K = K # [batch,...,seq_k,d_k]
         self.V = V # [batch,...,seq_k,d_v]
         self.mask = mask # [seq_q,seq_k]
