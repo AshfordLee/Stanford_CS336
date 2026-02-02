@@ -267,7 +267,7 @@ def merge_pair(frequency_dict, pair_frequencies, pair_to_tokens, best_pair,Debug
 def train_bpe(input_path:str, vocab_size:int, special_tokens:list[str], Debug=False):
 
     total_start = time.time()
-    logger.info("=== Start Training BPE ===")
+    # logger.info("=== Start Training BPE ===")
 
 
 
@@ -277,12 +277,12 @@ def train_bpe(input_path:str, vocab_size:int, special_tokens:list[str], Debug=Fa
     else:
         frequency_dict = load_and_chunk_file(input_path, desired_num_chunks=4, split_special_token=special_tokens)
     load_time = time.time() - load_start
-    logger.info(f"文件加载和分块耗时: {load_time:.4f}秒")
+    # logger.info(f"文件加载和分块耗时: {load_time:.4f}秒")
     
     init_start = time.time()
     vocab, merges = initialize_vocab_and_merges(special_tokens)
     init_time = time.time() - init_start
-    logger.info(f"初始化词表耗时: {init_time:.4f}秒")
+    # logger.info(f"初始化词表耗时: {init_time:.4f}秒")
 
     pair_start = time.time()
     if Debug==True:
@@ -290,7 +290,7 @@ def train_bpe(input_path:str, vocab_size:int, special_tokens:list[str], Debug=Fa
     else:
         pair_frequencies, pair_to_tokens = get_initial_pair_frequencies(frequency_dict)
     pair_time = time.time() - pair_start
-    logger.info(f"计算初始pair频率耗时: {pair_time:.4f}秒")
+    # logger.info(f"计算初始pair频率耗时: {pair_time:.4f}秒")
     
 
     loop_start = time.time()
@@ -314,7 +314,7 @@ def train_bpe(input_path:str, vocab_size:int, special_tokens:list[str], Debug=Fa
 
 
     loop_end = time.time() - loop_start
-    logger.info(f"计算循环耗时: {loop_end:.4f}秒")
+    # logger.info(f"计算循环耗时: {loop_end:.4f}秒")
     return vocab,merges
 
 

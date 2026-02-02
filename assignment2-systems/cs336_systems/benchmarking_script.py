@@ -9,6 +9,8 @@ import json
 import os
 import pandas as pd
 from loguru import logger
+import torch.cuda.nvtx as nvtx
+# from nvtx import annotate as nvtx
 
 def parse_arguments():
     
@@ -182,45 +184,51 @@ def run_forward_backward(model, batch, include_backward=False):
 
     return outputs
 
-
+@nvtx.range("benchmark model")
 def benchmark_model(model, args):
 
-    batch = generate_random_batch(
-        args.vocab_size, 
-        args.context_length, 
-        args.batch_size, 
-        args.device
-    )
+    with nvtx.range("benchmark model"):
 
-    logger.info(f"Running {args.num_warmup} steps of warming:")
-    model.train() if args.include_backward else model.eval()
+        batch = generate_random_batch(
+            args.vocab_size, 
+            args.context_length, 
+            args.batch_size, 
+            args.device
+        )
 
-    for _ in range(args.num_warmup):
-        run_forward_backward(model, batch, args.include_backward)
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        with nvtx.range("warmup"):
 
-    logger.info(f"Running {args.num_iterations} steps:")
-    times = []
+            logger.info(f"Running {args.num_warmup} steps of warming:")
+            model.train() if args.include_backward else model.eval()
 
-    for _ in range(args.num_iterations):
-        # 清除之前的梯度
-        if args.include_backward:
-            model.zero_grad()
-        
-        # 计时开始
-        start_time = timeit.default_timer()
-        
-        # 执行一步
-        run_forward_backward(model, batch, args.include_backward)
-        
-        # GPU同步
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        
-        # 计时结束
-        end_time = timeit.default_timer()
-        times.append(end_time - start_time)
+            for _ in range(args.num_warmup):
+                run_forward_backward(model, batch, args.include_backward)
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+
+            logger.info(f"Running {args.num_iterations} steps:")
+            times = []
+
+            with nvtx.range("iterations"):
+
+                for _ in range(args.num_iterations):
+                    # 清除之前的梯度
+                    if args.include_backward:
+                        model.zero_grad()
+                    
+                    # 计时开始
+                    start_time = timeit.default_timer()
+                    
+                    # 执行一步
+                    run_forward_backward(model, batch, args.include_backward)
+                    
+                    # GPU同步
+                    if torch.cuda.is_available():
+                        torch.cuda.synchronize()
+                    
+                    # 计时结束
+                    end_time = timeit.default_timer()
+                    times.append(end_time - start_time)
     
     return times
 

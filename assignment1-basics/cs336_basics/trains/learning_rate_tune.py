@@ -41,7 +41,7 @@ def parse_args():
                        help='Directory to save sweep results')
     
     # 训练超参数 (使用默认值)
-    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--batch_size', type=int, default=96)
     parser.add_argument('--learning_rate', type=float, default=1e-3)  # 单个训练时的默认值
     parser.add_argument('--weight_decay', type=float, default=0.01)
     parser.add_argument('--beta1', type=float, default=0.9)

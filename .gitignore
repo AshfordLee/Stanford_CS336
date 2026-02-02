@@ -10,3 +10,4 @@ OpenWebText_Result/
 TinyStories_Result/
 *.pt
 HyperParameter_Result/
+*.nsys-rep
